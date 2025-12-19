@@ -504,9 +504,16 @@ def search_expenses():
 
 
 def main() -> None:
+    import os
     _init_db()
-    print(f"서버 시작: http://127.0.0.1:5056")
-    app.run(host="127.0.0.1", port=5056, debug=True)
+    
+    # Render는 PORT 환경 변수를 제공합니다
+    port = int(os.environ.get("PORT", 5056))
+    # 프로덕션 환경에서는 debug=False
+    debug = os.environ.get("FLASK_ENV") != "production"
+    
+    print(f"서버 시작: http://0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=debug)
 
 
 if __name__ == "__main__":
