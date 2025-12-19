@@ -709,3 +709,126 @@ h1 {
     flex-wrap: wrap;
   }
 }
+
+/* 로그인 페이지 */
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.login-box {
+  background: white;
+  border-radius: 24px;
+  padding: 48px 40px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.login-box h1 {
+  font-size: 32px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.login-subtitle {
+  font-size: 14px;
+  color: var(--text-light);
+  margin-bottom: 32px;
+}
+
+.login-box .form-group {
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.login-box input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+.login-box input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.btn-login {
+  width: 100%;
+  padding: 14px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.btn-login:hover {
+  background: var(--primary-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+}
+
+.error-message {
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  margin-bottom: 16px;
+  border: 1px solid #fecaca;
+}
+
+/* 로그아웃 버튼 */
+.header-actions {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+}
+
+.btn-logout {
+  padding: 8px 16px;
+  background: white;
+  color: var(--text-light);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-logout:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+@media (max-width: 768px) {
+  .login-box {
+    padding: 40px 24px;
+  }
+
+  .login-box h1 {
+    font-size: 28px;
+  }
+
+  .header-actions {
+    position: static;
+    margin-bottom: 16px;
+  }
+}

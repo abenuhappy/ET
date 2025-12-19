@@ -608,6 +608,23 @@ window.deletePayee = async (id) => {
   }
 };
 
+// 로그아웃 기능
+const btnLogout = qs("btnLogout");
+if (btnLogout) {
+  btnLogout.addEventListener("click", async () => {
+    if (!confirm("로그아웃하시겠습니까?")) return;
+
+    try {
+      await api("/api/logout", { method: "POST" });
+      window.location.href = "/login";
+    } catch (err) {
+      console.error("로그아웃 실패:", err);
+      // 실패해도 로그인 페이지로 이동
+      window.location.href = "/login";
+    }
+  });
+}
+
 // 초기 로드
 loadAll();
 renderCalendar();

@@ -6,13 +6,31 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for
+from functools import wraps
 
 # 기본 디렉토리
 APP_DIR = Path(__file__).parent.absolute()
 DB_PATH = APP_DIR / "expense_tracker.db"
 
 app = Flask(__name__)
+
+# 세션 암호화를 위한 SECRET_KEY 설정
+import os
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# 비밀번호 설정 (환경 변수 또는 기본값)
+APP_PASSWORD = os.environ.get('APP_PASSWORD', 'jinipini0608')
+
+
+# 인증 데코레이터
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('authenticated'):
+            return jsonify({'error': '인증이 필요합니다.'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def _db() -> sqlite3.Connection:
@@ -54,6 +72,7 @@ def _init_db() -> None:
 
 
 @app.get("/api/payees")
+@login_required
 def list_payees():
     """거래처 목록 조회"""
     with _db() as conn:
@@ -72,6 +91,7 @@ def list_payees():
 
 
 @app.post("/api/payees")
+@login_required
 def create_payee():
     """거래처 추가"""
     payload = request.get_json(force=True) or {}
@@ -96,6 +116,7 @@ def create_payee():
 
 
 @app.put("/api/payees/<int:payee_id>")
+@login_required
 def update_payee(payee_id: int):
     """거래처 수정"""
     payload = request.get_json(force=True) or {}
@@ -122,6 +143,7 @@ def update_payee(payee_id: int):
 
 
 @app.delete("/api/payees/<int:payee_id>")
+@login_required
 def delete_payee(payee_id: int):
     """거래처 삭제"""
     with _db() as conn:
@@ -163,10 +185,39 @@ def _parse_date(date_str: str) -> str:
 
 @app.route("/")
 def index():
+    if not session.get('authenticated'):
+        return redirect(url_for('login_page'))
     return render_template("index.html")
 
 
+@app.route("/login")
+def login_page():
+    """로그인 페이지"""
+    return render_template("login.html")
+
+
+@app.post("/api/login")
+def login():
+    """로그인 API"""
+    payload = request.get_json(force=True) or {}
+    password = payload.get('password', '')
+    
+    if password == APP_PASSWORD:
+        session['authenticated'] = True
+        return jsonify({'ok': True})
+    else:
+        return jsonify({'error': '비밀번호가 올바르지 않습니다.'}), 401
+
+
+@app.post("/api/logout")
+def logout():
+    """로그아웃 API"""
+    session.pop('authenticated', None)
+    return jsonify({'ok': True})
+
+
 @app.get("/api/expenses")
+@login_required
 def list_expenses():
     """지출 목록 조회"""
     with _db() as conn:
@@ -188,6 +239,7 @@ def list_expenses():
 
 
 @app.post("/api/expenses")
+@login_required
 def create_expense():
     """지출 추가"""
     payload = request.get_json(force=True) or {}
@@ -225,6 +277,7 @@ def create_expense():
 
 
 @app.put("/api/expenses/<int:expense_id>")
+@login_required
 def update_expense(expense_id: int):
     """지출 수정"""
     payload = request.get_json(force=True) or {}
@@ -267,6 +320,7 @@ def update_expense(expense_id: int):
 
 
 @app.delete("/api/expenses/<int:expense_id>")
+@login_required
 def delete_expense(expense_id: int):
     """지출 삭제"""
     with _db() as conn:
@@ -276,6 +330,7 @@ def delete_expense(expense_id: int):
 
 
 @app.post("/api/import/csv")
+@login_required
 def import_csv():
     """CSV 파일 업로드 및 데이터 임포트"""
     if "file" not in request.files:
@@ -344,6 +399,7 @@ def import_csv():
 
 
 @app.get("/api/statistics")
+@login_required
 def get_statistics():
     """통계 정보 조회"""
     with _db() as conn:
@@ -402,6 +458,7 @@ def get_statistics():
 
 
 @app.get("/api/expenses/by-date")
+@login_required
 def get_expenses_by_date():
     """날짜별 지출 조회"""
     date_str = request.args.get("date")
@@ -432,6 +489,7 @@ def get_expenses_by_date():
 
 
 @app.get("/api/expenses/calendar")
+@login_required
 def get_calendar_data():
     """캘린더용 월별 지출 데이터 조회"""
     year = request.args.get("year", type=int)
@@ -472,6 +530,7 @@ def get_calendar_data():
 
 
 @app.get("/api/expenses/search")
+@login_required
 def search_expenses():
     """거래처 또는 지불처 검색"""
     query = request.args.get("q", "").strip()
