@@ -11,7 +11,11 @@ from functools import wraps
 
 # 기본 디렉토리
 APP_DIR = Path(__file__).parent.absolute()
-DB_PATH = APP_DIR / "expense_tracker.db"
+
+# Render Disk 경로 설정 (환경 변수로 제어)
+import os
+DATA_DIR = os.environ.get('DATA_DIR', str(APP_DIR))
+DB_PATH = Path(DATA_DIR) / "expense_tracker.db"
 
 app = Flask(__name__)
 
