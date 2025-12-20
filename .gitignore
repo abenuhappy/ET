@@ -14,6 +14,11 @@ env/
 *.sqlite
 *.sqlite3
 
+# Data files (CSV는 Git에 포함, JSON은 캐시용)
+data.json
+*.json.tmp
+*.csv.tmp
+
 # IDE
 .vscode/
 .idea/

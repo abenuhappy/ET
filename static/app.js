@@ -120,7 +120,8 @@ async function saveExpenseRow(tr) {
     const k = inp.getAttribute("data-k");
     const v = inp.value.trim();
     if (k === "amount") {
-      data[k] = parseFloat(v) || 0;
+      // 금액은 문자열로 전송 (콤마 포함 가능, 백엔드에서 파싱)
+      data[k] = v.replace(/,/g, "") || "0";
     } else {
       data[k] = v;
     }
@@ -211,9 +212,11 @@ if (expenseForm) {
     e.preventDefault();
 
     const id = qs("expenseId").value;
+    // 금액은 문자열로 전송 (콤마 포함 가능, 백엔드에서 파싱)
+    const amountValue = qs("amount").value.trim().replace(/,/g, "");
     const data = {
       merchant: qs("merchant").value.trim(),
-      amount: parseFloat(qs("amount").value) || 0,
+      amount: amountValue || "0",
       approval_date: qs("approvalDate").value,
       payment_method: qs("paymentMethod").value.trim(),
       payment_cycle: qs("paymentCycle").value,

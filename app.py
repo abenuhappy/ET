@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import csv
-import sqlite3
+import json
+import threading
+import urllib.request
+import urllib.error
+import base64
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional, Union
 
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from functools import wraps
@@ -15,7 +19,11 @@ APP_DIR = Path(__file__).parent.absolute()
 # Render Disk 경로 설정 (환경 변수로 제어)
 import os
 DATA_DIR = os.environ.get('DATA_DIR', str(APP_DIR))
-DB_PATH = Path(DATA_DIR) / "expense_tracker.db"
+JSON_DATA_PATH = Path(DATA_DIR) / "data.json"  # 캐시용
+CSV_DATA_PATH = Path(DATA_DIR) / "expenses_data.csv"  # 기본 저장소
+
+# 파일 접근 동기화를 위한 락
+_data_lock = threading.Lock()
 
 app = Flask(__name__)
 
@@ -37,59 +45,280 @@ def login_required(f):
     return decorated_function
 
 
-def _db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
+def _load_from_github() -> Optional[Dict[str, Any]]:
+    """GitHub 저장소에서 data.json 파일을 가져오기 (공개/비공개 저장소 지원)"""
+    github_repo = os.environ.get('GITHUB_REPO')
+    if not github_repo:
+        return None
+    
+    try:
+        # GitHub raw URL 형식: https://raw.githubusercontent.com/{owner}/{repo}/{branch}/data.json
+        # 환경 변수에서 전체 URL 또는 owner/repo 형식 지원
+        if github_repo.startswith('http'):
+            url = f"{github_repo.rstrip('/')}/data.json"
+        else:
+            # owner/repo 형식인 경우
+            branch = os.environ.get('GITHUB_BRANCH', 'main')
+            url = f"https://raw.githubusercontent.com/{github_repo}/{branch}/data.json"
+        
+        print(f"GitHub에서 데이터 로드 시도: {url}")
+        
+        # 비공개 저장소를 위한 인증 헤더 (선택사항)
+        headers = {}
+        github_token = os.environ.get('GITHUB_TOKEN')
+        if github_token:
+            # GitHub API를 통한 접근 (비공개 저장소용)
+            # raw.githubusercontent.com은 비공개 저장소에서 인증이 필요할 수 있음
+            # 대신 GitHub API 사용
+            if not github_repo.startswith('http'):
+                # owner/repo 형식인 경우 API 사용
+                api_url = f"https://api.github.com/repos/{github_repo}/contents/data.json"
+                if branch != 'main':
+                    api_url += f"?ref={branch}"
+                
+                req = urllib.request.Request(api_url, headers={'Authorization': f'token {github_token}'})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    api_data = json.loads(response.read().decode('utf-8'))
+                    # Base64 디코딩
+                    content = base64.b64decode(api_data['content']).decode('utf-8')
+                    data = json.loads(content)
+                    print(f"GitHub API를 통해 데이터 로드 성공: {len(data.get('expenses', []))}건의 지출, {len(data.get('payees', []))}건의 거래처")
+                    return data
+        
+        # 공개 저장소 또는 토큰이 없는 경우 일반 raw URL 사용
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            print(f"GitHub에서 데이터 로드 성공: {len(data.get('expenses', []))}건의 지출, {len(data.get('payees', []))}건의 거래처")
+            return data
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, Exception) as e:
+        print(f"GitHub에서 데이터 로드 실패: {e}")
+        return None
 
 
-def _init_db() -> None:
-    with _db() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS expenses (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              merchant TEXT NOT NULL,
-              amount REAL NOT NULL,
-              approval_date TEXT NOT NULL,
-              payment_method TEXT NOT NULL,
-              payment_cycle TEXT NOT NULL,
-              created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-              updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS payees (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL,
-              account_number TEXT NOT NULL,
-              bank_name TEXT NOT NULL,
-              owner_name TEXT NOT NULL,
-              created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-              updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-            )
-            """
-        )
-        conn.commit()
+def _load_from_csv() -> Optional[Dict[str, Any]]:
+    """CSV 파일에서 데이터 로드"""
+    if not CSV_DATA_PATH.exists():
+        return None
+    
+    try:
+        expenses = []
+        
+        # 먼저 JSON에서 ID 매핑 정보 가져오기 (있는 경우)
+        id_mapping = {}  # (merchant, amount, approval_date) -> id
+        next_expense_id = 1
+        if JSON_DATA_PATH.exists():
+            try:
+                with open(JSON_DATA_PATH, "r", encoding="utf-8") as f:
+                    json_data = json.load(f)
+                    for exp in json_data.get("expenses", []):
+                        key = (exp.get("merchant"), exp.get("amount"), exp.get("approval_date"))
+                        id_mapping[key] = exp.get("id", 0)
+                    next_expense_id = json_data.get("next_expense_id", 1)
+            except:
+                pass
+        
+        with open(CSV_DATA_PATH, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                merchant = row.get("학원", "").strip()
+                amount_str = row.get("금액", "").strip()
+                approval_date_str = row.get("승인 날짜", "").strip()
+                payment_method = row.get("거래처", "").strip()
+                payment_cycle = row.get("결제 주기", "").strip()
+                
+                if not merchant or not approval_date_str:
+                    continue
+                
+                amount = _parse_amount(amount_str)
+                approval_date = _parse_date(approval_date_str)
+                
+                if not approval_date:
+                    continue
+                
+                # ID는 JSON에서 가져오거나, 없으면 새로 부여
+                key = (merchant, amount, approval_date)
+                expense_id = id_mapping.get(key, next_expense_id)
+                if expense_id >= next_expense_id:
+                    next_expense_id = expense_id + 1
+                
+                expense = {
+                    "id": expense_id,
+                    "merchant": merchant,
+                    "amount": amount,
+                    "approval_date": approval_date,
+                    "payment_method": payment_method,
+                    "payment_cycle": payment_cycle,
+                    "created_at": _get_current_time(),
+                    "updated_at": _get_current_time()
+                }
+                expenses.append(expense)
+        
+        # JSON에서 payees 로드 (거래처는 JSON에 저장)
+        payees = []
+        next_payee_id = 1
+        if JSON_DATA_PATH.exists():
+            try:
+                with open(JSON_DATA_PATH, "r", encoding="utf-8") as f:
+                    json_data = json.load(f)
+                    payees = json_data.get("payees", [])
+                    next_payee_id = json_data.get("next_payee_id", len(payees) + 1)
+            except:
+                pass
+        
+        return {
+            "expenses": expenses,
+            "payees": payees,
+            "next_expense_id": next_expense_id,
+            "next_payee_id": next_payee_id
+        }
+    except Exception as e:
+        print(f"CSV 파일 로드 실패: {e}")
+        return None
+
+
+def _load_data() -> Dict[str, Any]:
+    """CSV 파일에서 데이터 로드 (우선순위: CSV > JSON > GitHub)"""
+    CSV_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    JSON_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
+    # 1. CSV 파일에서 로드 시도
+    csv_data = _load_from_csv()
+    if csv_data:
+        print(f"CSV에서 데이터 로드 성공: {len(csv_data.get('expenses', []))}건의 지출")
+        # JSON 캐시도 업데이트
+        _save_data_to_json(csv_data)
+        return csv_data
+    
+    # 2. JSON 파일에서 로드 시도
+    if JSON_DATA_PATH.exists():
+        try:
+            with open(JSON_DATA_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                print(f"JSON에서 데이터 로드 성공: {len(data.get('expenses', []))}건의 지출")
+                # CSV로 변환하여 저장
+                _save_data_to_csv(data)
+                return data
+        except (json.JSONDecodeError, IOError):
+            print(f"JSON 파일 손상, GitHub에서 로드 시도...")
+    
+    # 3. GitHub에서 가져오기 시도
+    github_data = _load_from_github()
+    if github_data:
+        _save_data(github_data)
+        return github_data
+    
+    # 4. 모두 실패하면 초기 데이터 생성
+    print("데이터 파일이 없어 초기 데이터 생성")
+    initial_data = {
+        "expenses": [],
+        "payees": [],
+        "next_expense_id": 1,
+        "next_payee_id": 1
+    }
+    _save_data(initial_data)
+    return initial_data
+
+
+def _save_data_to_csv(data: Dict[str, Any]) -> None:
+    """데이터를 CSV 파일에 저장"""
+    CSV_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
+    expenses = data.get("expenses", [])
+    if not expenses:
+        # 빈 CSV 파일 생성
+        with open(CSV_DATA_PATH, 'w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.DictWriter(f, fieldnames=['학원', '금액', '승인 날짜', '거래처', '결제 주기'])
+            writer.writeheader()
+        return
+    
+    # 날짜순으로 정렬
+    expenses = sorted(expenses, key=lambda x: x.get("approval_date", ""))
+    
+    # 임시 파일에 먼저 저장 후 원자적으로 교체
+    temp_path = CSV_DATA_PATH.with_suffix('.csv.tmp')
+    with open(temp_path, 'w', newline='', encoding='utf-8-sig') as f:
+        fieldnames = ['학원', '금액', '승인 날짜', '거래처', '결제 주기']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        for expense in expenses:
+            # 날짜 형식 변환: YYYY-MM-DD -> YY/MM/DD
+            approval_date = expense.get('approval_date', '')
+            if approval_date:
+                date_parts = approval_date.split('-')
+                if len(date_parts) == 3:
+                    year = date_parts[0][2:]  # 2025 -> 25
+                    month = date_parts[1]
+                    day = date_parts[2]
+                    formatted_date = f"{year}/{month}/{day}"
+                else:
+                    formatted_date = approval_date
+            else:
+                formatted_date = ""
+            
+            # 금액 포맷팅 (콤마 포함)
+            amount = expense.get('amount', 0)
+            amount_str = f"{int(amount):,}"
+            
+            writer.writerow({
+                '학원': expense.get('merchant', ''),
+                '금액': amount_str,
+                '승인 날짜': formatted_date,
+                '거래처': expense.get('payment_method', ''),
+                '결제 주기': expense.get('payment_cycle', '')
+            })
+    
+    # 원자적으로 교체
+    temp_path.replace(CSV_DATA_PATH)
+
+
+def _save_data_to_json(data: Dict[str, Any]) -> None:
+    """데이터를 JSON 파일에 저장 (캐시용)"""
+    JSON_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
+    # 임시 파일에 먼저 저장 후 원자적으로 교체
+    temp_path = JSON_DATA_PATH.with_suffix('.json.tmp')
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    # 원자적으로 교체
+    temp_path.replace(JSON_DATA_PATH)
+
+
+def _save_data(data: Dict[str, Any]) -> None:
+    """데이터를 CSV와 JSON 파일에 저장"""
+    _save_data_to_csv(data)  # CSV가 기본 저장소
+    _save_data_to_json(data)  # JSON은 캐시용
+
+
+def _get_current_time() -> str:
+    """현재 시간을 문자열로 반환"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _init_data() -> None:
+    """데이터 초기화 (JSON 파일이 없으면 생성)"""
+    with _data_lock:
+        _load_data()
 
 
 @app.get("/api/payees")
 @login_required
 def list_payees():
     """거래처 목록 조회"""
-    with _db() as conn:
-        rows = conn.execute("SELECT * FROM payees ORDER BY name ASC").fetchall()
+    with _data_lock:
+        data = _load_data()
+        payees = sorted(data.get("payees", []), key=lambda x: x.get("name", ""))
         payees = [
             {
-                "id": row["id"],
-                "name": row["name"],
-                "account_number": row["account_number"],
-                "bank_name": row["bank_name"],
-                "owner_name": row["owner_name"],
+                "id": p["id"],
+                "name": p["name"],
+                "account_number": p["account_number"],
+                "bank_name": p["bank_name"],
+                "owner_name": p["owner_name"],
             }
-            for row in rows
+            for p in payees
         ]
     return jsonify({"payees": payees})
 
@@ -107,15 +336,21 @@ def create_payee():
     if not name or not account_number or not bank_name or not owner_name:
         return jsonify({"error": "필수 항목이 누락되었습니다."}), 400
 
-    with _db() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO payees (name, account_number, bank_name, owner_name)
-            VALUES (?, ?, ?, ?)
-            """,
-            (name, account_number, bank_name, owner_name),
-        )
-        conn.commit()
+    with _data_lock:
+        data = _load_data()
+        payee_id = data.get("next_payee_id", 1)
+        payee = {
+            "id": payee_id,
+            "name": name,
+            "account_number": account_number,
+            "bank_name": bank_name,
+            "owner_name": owner_name,
+            "created_at": _get_current_time(),
+            "updated_at": _get_current_time()
+        }
+        data.setdefault("payees", []).append(payee)
+        data["next_payee_id"] = payee_id + 1
+        _save_data(data)
     return jsonify({"ok": True})
 
 
@@ -132,17 +367,20 @@ def update_payee(payee_id: int):
     if not name or not account_number or not bank_name or not owner_name:
         return jsonify({"error": "필수 항목이 누락되었습니다."}), 400
 
-    with _db() as conn:
-        conn.execute(
-            """
-            UPDATE payees 
-            SET name = ?, account_number = ?, bank_name = ?, owner_name = ?,
-                updated_at = datetime('now', 'localtime')
-            WHERE id = ?
-            """,
-            (name, account_number, bank_name, owner_name, payee_id),
-        )
-        conn.commit()
+    with _data_lock:
+        data = _load_data()
+        payees = data.get("payees", [])
+        payee = next((p for p in payees if p.get("id") == payee_id), None)
+        
+        if not payee:
+            return jsonify({"error": "거래처를 찾을 수 없습니다."}), 404
+        
+        payee["name"] = name
+        payee["account_number"] = account_number
+        payee["bank_name"] = bank_name
+        payee["owner_name"] = owner_name
+        payee["updated_at"] = _get_current_time()
+        _save_data(data)
     return jsonify({"ok": True})
 
 
@@ -150,19 +388,36 @@ def update_payee(payee_id: int):
 @login_required
 def delete_payee(payee_id: int):
     """거래처 삭제"""
-    with _db() as conn:
-        conn.execute("DELETE FROM payees WHERE id = ?", (payee_id,))
-        conn.commit()
+    with _data_lock:
+        data = _load_data()
+        payees = data.get("payees", [])
+        data["payees"] = [p for p in payees if p.get("id") != payee_id]
+        _save_data(data)
     return jsonify({"ok": True})
 
 
-def _parse_amount(amount_str: str) -> float:
-    """금액 문자열을 float로 변환 (콤마 제거)"""
+def _parse_amount(amount_input: Union[str, float, int]) -> float:
+    """금액을 float로 변환 (콤마 제거, 숫자/문자열 모두 처리)"""
+    if amount_input is None:
+        return 0.0
+    
+    # 이미 숫자인 경우
+    if isinstance(amount_input, (int, float)):
+        return float(amount_input)
+    
+    # 문자열인 경우
+    if not isinstance(amount_input, str):
+        amount_str = str(amount_input)
+    else:
+        amount_str = amount_input.strip()
+    
     if not amount_str:
         return 0.0
+    
     try:
-        # 콤마 제거 후 변환
-        return float(amount_str.replace(",", ""))
+        # 콤마와 공백 제거 후 변환
+        cleaned = amount_str.replace(",", "").replace(" ", "").replace("원", "")
+        return float(cleaned)
     except (ValueError, AttributeError):
         return 0.0
 
@@ -224,20 +479,23 @@ def logout():
 @login_required
 def list_expenses():
     """지출 목록 조회"""
-    with _db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM expenses ORDER BY approval_date DESC, id DESC"
-        ).fetchall()
+    with _data_lock:
+        data = _load_data()
+        expenses = sorted(
+            data.get("expenses", []),
+            key=lambda x: (x.get("approval_date", ""), x.get("id", 0)),
+            reverse=True
+        )
         expenses = [
             {
-                "id": row["id"],
-                "merchant": row["merchant"],
-                "amount": row["amount"],
-                "approval_date": row["approval_date"],
-                "payment_method": row["payment_method"],
-                "payment_cycle": row["payment_cycle"],
+                "id": e["id"],
+                "merchant": e["merchant"],
+                "amount": e["amount"],
+                "approval_date": e["approval_date"],
+                "payment_method": e["payment_method"],
+                "payment_cycle": e["payment_cycle"],
             }
-            for row in rows
+            for e in expenses
         ]
     return jsonify({"expenses": expenses})
 
@@ -257,25 +515,31 @@ def create_expense():
     if not merchant or not approval_date or not payment_method or not payment_cycle:
         return jsonify({"error": "필수 항목이 누락되었습니다."}), 400
     
-    with _db() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO expenses (merchant, amount, approval_date, payment_method, payment_cycle)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (merchant, amount, approval_date, payment_method, payment_cycle),
-        )
-        conn.commit()
-        row = conn.execute("SELECT * FROM expenses WHERE id = ?", (cur.lastrowid,)).fetchone()
+    with _data_lock:
+        data = _load_data()
+        expense_id = data.get("next_expense_id", 1)
+        expense = {
+            "id": expense_id,
+            "merchant": merchant,
+            "amount": amount,
+            "approval_date": approval_date,
+            "payment_method": payment_method,
+            "payment_cycle": payment_cycle,
+            "created_at": _get_current_time(),
+            "updated_at": _get_current_time()
+        }
+        data.setdefault("expenses", []).append(expense)
+        data["next_expense_id"] = expense_id + 1
+        _save_data(data)
     
     return jsonify({
         "expense": {
-            "id": row["id"],
-            "merchant": row["merchant"],
-            "amount": row["amount"],
-            "approval_date": row["approval_date"],
-            "payment_method": row["payment_method"],
-            "payment_cycle": row["payment_cycle"],
+            "id": expense["id"],
+            "merchant": expense["merchant"],
+            "amount": expense["amount"],
+            "approval_date": expense["approval_date"],
+            "payment_method": expense["payment_method"],
+            "payment_cycle": expense["payment_cycle"],
         }
     })
 
@@ -295,30 +559,30 @@ def update_expense(expense_id: int):
     if not merchant or not approval_date or not payment_method or not payment_cycle:
         return jsonify({"error": "필수 항목이 누락되었습니다."}), 400
     
-    with _db() as conn:
-        conn.execute(
-            """
-            UPDATE expenses
-            SET merchant = ?, amount = ?, approval_date = ?, payment_method = ?, payment_cycle = ?,
-                updated_at = datetime('now', 'localtime')
-            WHERE id = ?
-            """,
-            (merchant, amount, approval_date, payment_method, payment_cycle, expense_id),
-        )
-        conn.commit()
-        row = conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone()
-    
-    if not row:
-        return jsonify({"error": "지출을 찾을 수 없습니다."}), 404
+    with _data_lock:
+        data = _load_data()
+        expenses = data.get("expenses", [])
+        expense = next((e for e in expenses if e.get("id") == expense_id), None)
+        
+        if not expense:
+            return jsonify({"error": "지출을 찾을 수 없습니다."}), 404
+        
+        expense["merchant"] = merchant
+        expense["amount"] = amount
+        expense["approval_date"] = approval_date
+        expense["payment_method"] = payment_method
+        expense["payment_cycle"] = payment_cycle
+        expense["updated_at"] = _get_current_time()
+        _save_data(data)
     
     return jsonify({
         "expense": {
-            "id": row["id"],
-            "merchant": row["merchant"],
-            "amount": row["amount"],
-            "approval_date": row["approval_date"],
-            "payment_method": row["payment_method"],
-            "payment_cycle": row["payment_cycle"],
+            "id": expense["id"],
+            "merchant": expense["merchant"],
+            "amount": expense["amount"],
+            "approval_date": expense["approval_date"],
+            "payment_method": expense["payment_method"],
+            "payment_cycle": expense["payment_cycle"],
         }
     })
 
@@ -327,9 +591,11 @@ def update_expense(expense_id: int):
 @login_required
 def delete_expense(expense_id: int):
     """지출 삭제"""
-    with _db() as conn:
-        conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
-        conn.commit()
+    with _data_lock:
+        data = _load_data()
+        expenses = data.get("expenses", [])
+        data["expenses"] = [e for e in expenses if e.get("id") != expense_id]
+        _save_data(data)
     return jsonify({"ok": True})
 
 
@@ -352,7 +618,11 @@ def import_csv():
         inserted = 0
         errors = []
         
-        with _db() as conn:
+        with _data_lock:
+            data = _load_data()
+            expenses = data.get("expenses", [])
+            next_id = data.get("next_expense_id", 1)
+            
             for idx, row in enumerate(reader, start=2):  # 헤더 제외하고 2부터 시작
                 try:
                     merchant = row.get("학원", "").strip()
@@ -373,26 +643,34 @@ def import_csv():
                         continue
                     
                     # 중복 체크 (같은 거래처, 금액, 날짜가 있으면 건너뛰기)
-                    existing = conn.execute(
-                        "SELECT id FROM expenses WHERE merchant = ? AND amount = ? AND approval_date = ?",
-                        (merchant, amount, approval_date)
-                    ).fetchone()
+                    existing = next(
+                        (e for e in expenses if e.get("merchant") == merchant and 
+                         e.get("amount") == amount and e.get("approval_date") == approval_date),
+                        None
+                    )
                     
                     if existing:
                         continue
                     
-                    conn.execute(
-                        """
-                        INSERT INTO expenses (merchant, amount, approval_date, payment_method, payment_cycle)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (merchant, amount, approval_date, payment_method, payment_cycle),
-                    )
+                    expense = {
+                        "id": next_id,
+                        "merchant": merchant,
+                        "amount": amount,
+                        "approval_date": approval_date,
+                        "payment_method": payment_method,
+                        "payment_cycle": payment_cycle,
+                        "created_at": _get_current_time(),
+                        "updated_at": _get_current_time()
+                    }
+                    expenses.append(expense)
+                    next_id += 1
                     inserted += 1
                 except Exception as e:
                     errors.append(f"{idx}행: {str(e)}")
             
-            conn.commit()
+            data["expenses"] = expenses
+            data["next_expense_id"] = next_id
+            _save_data(data)
         
         return jsonify({
             "inserted": inserted,
@@ -406,51 +684,44 @@ def import_csv():
 @login_required
 def get_statistics():
     """통계 정보 조회"""
-    with _db() as conn:
+    with _data_lock:
+        data = _load_data()
+        expenses = data.get("expenses", [])
+        
         # 총 지출액
-        total_row = conn.execute("SELECT SUM(amount) as total FROM expenses").fetchone()
-        total_amount = total_row["total"] or 0.0
+        total_amount = sum(e.get("amount", 0) for e in expenses)
         
         # 거래처별 합계
-        merchant_rows = conn.execute(
-            """
-            SELECT merchant, SUM(amount) as total
-            FROM expenses
-            GROUP BY merchant
-            ORDER BY total DESC
-            """
-        ).fetchall()
+        merchant_totals_dict = {}
+        for e in expenses:
+            merchant = e.get("merchant", "")
+            amount = e.get("amount", 0)
+            merchant_totals_dict[merchant] = merchant_totals_dict.get(merchant, 0) + amount
         merchant_totals = [
-            {"merchant": row["merchant"], "total": row["total"]}
-            for row in merchant_rows
+            {"merchant": k, "total": v}
+            for k, v in sorted(merchant_totals_dict.items(), key=lambda x: x[1], reverse=True)
         ]
         
         # 지불처별 합계
-        payment_rows = conn.execute(
-            """
-            SELECT payment_method, SUM(amount) as total
-            FROM expenses
-            GROUP BY payment_method
-            ORDER BY total DESC
-            """
-        ).fetchall()
+        payment_totals_dict = {}
+        for e in expenses:
+            payment_method = e.get("payment_method", "")
+            amount = e.get("amount", 0)
+            payment_totals_dict[payment_method] = payment_totals_dict.get(payment_method, 0) + amount
         payment_totals = [
-            {"payment_method": row["payment_method"], "total": row["total"]}
-            for row in payment_rows
+            {"payment_method": k, "total": v}
+            for k, v in sorted(payment_totals_dict.items(), key=lambda x: x[1], reverse=True)
         ]
         
         # 결제 주기별 합계
-        cycle_rows = conn.execute(
-            """
-            SELECT payment_cycle, SUM(amount) as total
-            FROM expenses
-            GROUP BY payment_cycle
-            ORDER BY total DESC
-            """
-        ).fetchall()
+        cycle_totals_dict = {}
+        for e in expenses:
+            payment_cycle = e.get("payment_cycle", "")
+            amount = e.get("amount", 0)
+            cycle_totals_dict[payment_cycle] = cycle_totals_dict.get(payment_cycle, 0) + amount
         cycle_totals = [
-            {"payment_cycle": row["payment_cycle"], "total": row["total"]}
-            for row in cycle_rows
+            {"payment_cycle": k, "total": v}
+            for k, v in sorted(cycle_totals_dict.items(), key=lambda x: x[1], reverse=True)
         ]
     
     return jsonify({
@@ -469,25 +740,23 @@ def get_expenses_by_date():
     if not date_str:
         return jsonify({"error": "date 파라미터가 필요합니다."}), 400
     
-    with _db() as conn:
-        rows = conn.execute(
-            """
-            SELECT * FROM expenses
-            WHERE approval_date = ?
-            ORDER BY id DESC
-            """,
-            (date_str,),
-        ).fetchall()
+    with _data_lock:
+        data = _load_data()
+        expenses = [
+            e for e in data.get("expenses", [])
+            if e.get("approval_date") == date_str
+        ]
+        expenses = sorted(expenses, key=lambda x: x.get("id", 0), reverse=True)
         expenses = [
             {
-                "id": row["id"],
-                "merchant": row["merchant"],
-                "amount": row["amount"],
-                "approval_date": row["approval_date"],
-                "payment_method": row["payment_method"],
-                "payment_cycle": row["payment_cycle"],
+                "id": e["id"],
+                "merchant": e["merchant"],
+                "amount": e["amount"],
+                "approval_date": e["approval_date"],
+                "payment_method": e["payment_method"],
+                "payment_cycle": e["payment_cycle"],
             }
-            for row in rows
+            for e in expenses
         ]
     return jsonify({"expenses": expenses})
 
@@ -503,32 +772,30 @@ def get_calendar_data():
         return jsonify({"error": "year와 month 파라미터가 필요합니다."}), 400
     
     # 해당 월의 시작일과 종료일 계산
-    from datetime import datetime
     start_date = f"{year:04d}-{month:02d}-01"
     if month == 12:
         end_date = f"{year+1:04d}-01-01"
     else:
         end_date = f"{year:04d}-{month+1:02d}-01"
     
-    with _db() as conn:
-        rows = conn.execute(
-            """
-            SELECT approval_date, SUM(amount) as total, COUNT(*) as count
-            FROM expenses
-            WHERE approval_date >= ? AND approval_date < ?
-            GROUP BY approval_date
-            ORDER BY approval_date
-            """,
-            (start_date, end_date),
-        ).fetchall()
+    with _data_lock:
+        data = _load_data()
+        expenses = data.get("expenses", [])
         
-        daily_data = {
-            row["approval_date"]: {
-                "total": row["total"],
-                "count": row["count"],
-            }
-            for row in rows
-        }
+        # 해당 기간의 지출 필터링
+        filtered_expenses = [
+            e for e in expenses
+            if start_date <= e.get("approval_date", "") < end_date
+        ]
+        
+        # 날짜별로 그룹화
+        daily_data = {}
+        for e in filtered_expenses:
+            date_str = e.get("approval_date", "")
+            if date_str not in daily_data:
+                daily_data[date_str] = {"total": 0, "count": 0}
+            daily_data[date_str]["total"] += e.get("amount", 0)
+            daily_data[date_str]["count"] += 1
     
     return jsonify({"daily_data": daily_data})
 
@@ -541,26 +808,32 @@ def search_expenses():
     if not query:
         return jsonify({"expenses": []})
     
-    search_term = f"%{query}%"
-    with _db() as conn:
-        rows = conn.execute(
-            """
-            SELECT merchant, approval_date, amount, payment_method
-            FROM expenses
-            WHERE merchant LIKE ? OR payment_method LIKE ?
-            ORDER BY approval_date DESC, id DESC
-            """,
-            (search_term, search_term),
-        ).fetchall()
+    with _data_lock:
+        data = _load_data()
+        expenses = data.get("expenses", [])
+        
+        # 검색어가 포함된 지출 필터링
+        filtered_expenses = [
+            e for e in expenses
+            if query.lower() in e.get("merchant", "").lower() or 
+               query.lower() in e.get("payment_method", "").lower()
+        ]
+        
+        # 날짜와 ID로 정렬
+        filtered_expenses = sorted(
+            filtered_expenses,
+            key=lambda x: (x.get("approval_date", ""), x.get("id", 0)),
+            reverse=True
+        )
         
         expenses = [
             {
-                "merchant": row["merchant"],
-                "approval_date": row["approval_date"],
-                "amount": row["amount"],
-                "payment_method": row["payment_method"],
+                "merchant": e["merchant"],
+                "approval_date": e["approval_date"],
+                "amount": e["amount"],
+                "payment_method": e["payment_method"],
             }
-            for row in rows
+            for e in filtered_expenses
         ]
         
     return jsonify({"expenses": expenses})
@@ -568,7 +841,7 @@ def search_expenses():
 
 def main() -> None:
     import os
-    _init_db()
+    _init_data()
     
     # Render는 PORT 환경 변수를 제공합니다
     port = int(os.environ.get("PORT", 5056))
@@ -576,6 +849,7 @@ def main() -> None:
     debug = os.environ.get("FLASK_ENV") != "production"
     
     print(f"서버 시작: http://0.0.0.0:{port}")
+    print(f"데이터 저장 위치: {JSON_DATA_PATH}")
     app.run(host="0.0.0.0", port=port, debug=debug)
 
 
