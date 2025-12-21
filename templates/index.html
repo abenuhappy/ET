@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>가계부</title>
+  <title>Ray 가계부</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,10 +13,7 @@
 
 <body>
   <div class="wrap">
-    <div class="header-actions">
-      <button id="btnLogout" class="btn-logout">로그아웃</button>
-    </div>
-    <h1>가계부</h1>
+    <h1>Ray 가계부</h1>
 
     <div id="tab-calendar" class="tab-content active">
       <!-- 캘린더 섹션 -->
@@ -139,7 +136,6 @@
       <div class="card">
         <div class="card-header">
           <h2>거래처 관리</h2>
-          <button id="btnAddPayee" class="btn btn-primary btn-sm">거래처 추가 +</button>
         </div>
         <div class="payee-list" id="payeeListSection">
           <!-- 거래처 카드가 여기에 동적으로 추가됩니다 -->
@@ -247,16 +243,28 @@
             <input type="text" id="payeeName" required />
           </div>
           <div class="form-group">
-            <label for="payeeBank">은행명 *</label>
-            <input type="text" id="payeeBank" required />
+            <label for="payeeBank">은행명</label>
+            <input type="text" id="payeeBank" />
           </div>
           <div class="form-group">
-            <label for="payeeAccount">계좌번호 *</label>
-            <input type="text" id="payeeAccount" required />
+            <label for="payeeAccount">계좌번호</label>
+            <input type="text" id="payeeAccount" />
+            <div id="payeeAccountPreview" class="mask-preview" style="margin-top: 4px; font-size: 0.9em; color: var(--text-light);"></div>
           </div>
           <div class="form-group">
             <label for="payeeOwner">이름(예금주) *</label>
             <input type="text" id="payeeOwner" required />
+            <div id="payeeOwnerPreview" class="mask-preview" style="margin-top: 4px; font-size: 0.9em; color: var(--text-light);"></div>
+          </div>
+          <div class="form-group">
+            <label for="payeePaymentCycle">결제 주기 *</label>
+            <select id="payeePaymentCycle" required>
+              <option value="">선택하세요</option>
+              <option value="1M">1M (월 1회)</option>
+              <option value="3M">3M (3개월 1회)</option>
+              <option value="6M">6M (6개월 1회)</option>
+              <option value="1Y">1Y (연 1회)</option>
+            </select>
           </div>
           <div class="form-actions">
             <button type="button" class="btn" id="btnCancelPayee">취소</button>

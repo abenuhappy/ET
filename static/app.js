@@ -39,6 +39,56 @@ function formatDateKorean(dateStr) {
   return `${yy}년 ${parseInt(month)}월 ${parseInt(day)}일`;
 }
 
+function maskAccountNumber(accountNumber) {
+  if (!accountNumber) return "";
+  // 숫자만 추출
+  const numbers = accountNumber.replace(/\D/g, "");
+  const length = numbers.length;
+  
+  if (length <= 5) {
+    // 5자리 이하면 그대로 표시
+    return accountNumber;
+  }
+  
+  // 앞 5자리와 뒤 4자리 추출
+  const first5 = numbers.slice(0, 5);
+  const last4 = numbers.slice(-4);
+  
+  if (length <= 9) {
+    // 6~9자리: 앞5와 뒤4가 겹칠 수 있음
+    // 예: 8자리면 앞5(인덱스 0~4)와 뒤4(인덱스 4~7)가 겹침
+    // 이 경우 앞5 + 마스킹 + 뒤4로 표시
+    if (length === 9) {
+      // 9자리: 앞5 + 뒤4 = 9자리, 중간 없음
+      return first5 + last4;
+    } else {
+      // 6~8자리: 앞5와 뒤4가 겹치므로 마스킹 추가
+      return first5 + "*" + last4;
+    }
+  } else {
+    // 10자리 이상: 앞 5자리 + 마스킹 + 뒤 4자리
+    const middleLength = length - 9; // 전체 - 앞5 - 뒤4
+    return first5 + "*".repeat(middleLength) + last4;
+  }
+}
+
+function maskName(name) {
+  if (!name) return "";
+  const nameLength = name.length;
+  if (nameLength <= 1) {
+    return name; // 1글자는 그대로
+  } else if (nameLength === 2) {
+    // 2글자: 첫 글자 + *
+    return name[0] + "*";
+  } else if (nameLength === 3) {
+    // 3글자: 첫 글자 + * + 마지막 글자
+    return name[0] + "*" + name[2];
+  } else {
+    // 4글자 이상: 첫 글자 + (중간은 *) + 마지막 글자
+    return name[0] + "*".repeat(nameLength - 2) + name[nameLength - 1];
+  }
+}
+
 
 // 하단 탭 전환 로직
 const navItems = document.querySelectorAll(".nav-item");
@@ -390,7 +440,7 @@ function createCalendarDay(day, year, month, isOtherMonth, dayData, isToday = fa
     dayEl.classList.add("today");
   }
 
-  if (dayData && dayData.total > 0) {
+  if (dayData && (dayData.total > 0 || dayData.next_payments)) {
     dayEl.classList.add("has-expense");
   }
 
@@ -403,7 +453,20 @@ function createCalendarDay(day, year, month, isOtherMonth, dayData, isToday = fa
   dayNumber.textContent = day;
   dayEl.appendChild(dayNumber);
 
-  if (dayData && dayData.total > 0) {
+  // 다음 결제일이 있으면 거래처명 표시 (금액보다 우선)
+  if (dayData && dayData.next_payments && dayData.next_payments.length > 0) {
+    const nextPaymentEl = document.createElement("div");
+    nextPaymentEl.className = "day-next-payment";
+    // 여러 거래처가 있으면 첫 번째만 표시하고 나머지는 숫자로
+    if (dayData.next_payments.length === 1) {
+      nextPaymentEl.textContent = dayData.next_payments[0];
+    } else {
+      nextPaymentEl.textContent = `${dayData.next_payments[0]} 외 ${dayData.next_payments.length - 1}건`;
+    }
+    dayEl.appendChild(nextPaymentEl);
+    dayEl.classList.add("has-next-payment");
+  } else if (dayData && dayData.total > 0) {
+    // 다음 결제일이 없고 지출이 있으면 금액 표시
     const dayAmount = document.createElement("div");
     dayAmount.className = "day-amount";
     dayAmount.textContent = formatAmountOnly(dayData.total);
@@ -515,22 +578,34 @@ async function loadPayees() {
     if (payees.length === 0) {
       container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-light);">등록된 거래처가 없습니다.</div>';
     } else {
-      container.innerHTML = payees.map(p => `
+      container.innerHTML = payees.map(p => {
+        const bankInfo = p.bank_name || p.account_number 
+          ? `${p.bank_name || ''}${p.bank_name && p.account_number ? ' | ' : ''}${p.account_number ? maskAccountNumber(p.account_number) : ''}`
+          : '';
+        const details = [
+          bankInfo,
+          p.owner_name ? maskName(p.owner_name) : '',
+          p.payment_cycle || ''
+        ].filter(Boolean).join(' | ');
+        
+        // 금액 표시 (amount가 있으면 표시, 결제주기와 동일한 텍스트 사이즈)
+        const amountValue = p.amount !== undefined && p.amount !== null ? Number(p.amount) : 0;
+        const amountDisplay = amountValue > 0 
+          ? `<div class="payee-amount" style="margin-top: 8px; font-weight: 700; color: var(--expense-text);">${formatCurrency(amountValue)}</div>`
+          : '';
+        
+        return `
         <div class="payee-card">
           <div class="payee-info">
             <div class="payee-name">${escapeHtml(p.name)}</div>
             <div class="payee-details">
-              <span>${escapeHtml(p.bank_name)}</span> | 
-              <span>${escapeHtml(p.account_number)}</span> | 
-              <span>${escapeHtml(p.owner_name)}</span>
+              ${details || '<span style="color: var(--text-light);">정보 없음</span>'}
             </div>
-          </div>
-          <div class="payee-actions">
-            <button class="btn btn-sm" onclick="editPayee(${p.id}, '${escapeHtml(p.name).replace(/'/g, "\\'")}',' ${escapeHtml(p.bank_name).replace(/'/g, "\\'")}',' ${escapeHtml(p.account_number).replace(/'/g, "\\'")}',' ${escapeHtml(p.owner_name).replace(/'/g, "\\'")}')" >수정</button>
-            <button class="btn btn-danger btn-sm" onclick="deletePayee(${p.id})">삭제</button>
+            ${amountDisplay}
           </div>
         </div>
-      `).join("");
+      `;
+      }).join("");
     }
   } catch (err) {
     console.error("거래처 로드 실패:", err);
@@ -549,6 +624,11 @@ if (btnAddPayee) {
     editingPayeeId = null;
     qs("payeeModalTitle").textContent = "거래처 추가";
     payeeModal.style.display = "flex";
+    // 미리보기 초기화
+    const accountPreview = qs("payeeAccountPreview");
+    const ownerPreview = qs("payeeOwnerPreview");
+    if (accountPreview) accountPreview.textContent = "";
+    if (ownerPreview) ownerPreview.textContent = "";
   });
 }
 
@@ -556,10 +636,65 @@ function closePayeeModal() {
   payeeModal.style.display = "none";
   payeeForm.reset();
   editingPayeeId = null;
+  // 미리보기 초기화
+  const accountPreview = qs("payeeAccountPreview");
+  const ownerPreview = qs("payeeOwnerPreview");
+  if (accountPreview) accountPreview.textContent = "";
+  if (ownerPreview) ownerPreview.textContent = "";
 }
 
 if (btnClosePayeeModal) btnClosePayeeModal.addEventListener("click", closePayeeModal);
 if (btnCancelPayee) btnCancelPayee.addEventListener("click", closePayeeModal);
+
+// 마스킹 미리보기 업데이트 함수
+function updateMaskPreview() {
+  const accountInput = qs("payeeAccount");
+  const ownerInput = qs("payeeOwner");
+  const accountPreview = qs("payeeAccountPreview");
+  const ownerPreview = qs("payeeOwnerPreview");
+  
+  if (accountInput && accountPreview) {
+    const accountValue = accountInput.value.trim();
+    if (accountValue) {
+      const masked = maskAccountNumber(accountValue);
+      accountPreview.textContent = `미리보기: ${masked}`;
+      accountPreview.style.display = "block";
+    } else {
+      accountPreview.textContent = "";
+      accountPreview.style.display = "none";
+    }
+  }
+  
+  if (ownerInput && ownerPreview) {
+    const ownerValue = ownerInput.value.trim();
+    if (ownerValue) {
+      const masked = maskName(ownerValue);
+      ownerPreview.textContent = `미리보기: ${masked}`;
+      ownerPreview.style.display = "block";
+    } else {
+      ownerPreview.textContent = "";
+      ownerPreview.style.display = "none";
+    }
+  }
+}
+
+// 입력 필드에 이벤트 리스너 추가
+const payeeAccountInput = qs("payeeAccount");
+const payeeOwnerInput = qs("payeeOwner");
+
+if (payeeAccountInput) {
+  payeeAccountInput.addEventListener("input", updateMaskPreview);
+  payeeAccountInput.addEventListener("paste", () => {
+    setTimeout(updateMaskPreview, 10);
+  });
+}
+
+if (payeeOwnerInput) {
+  payeeOwnerInput.addEventListener("input", updateMaskPreview);
+  payeeOwnerInput.addEventListener("paste", () => {
+    setTimeout(updateMaskPreview, 10);
+  });
+}
 
 if (payeeForm) {
   payeeForm.addEventListener("submit", async (e) => {
@@ -569,7 +704,13 @@ if (payeeForm) {
       bank_name: qs("payeeBank").value.trim(),
       account_number: qs("payeeAccount").value.trim(),
       owner_name: qs("payeeOwner").value.trim(),
+      payment_cycle: qs("payeePaymentCycle").value,
     };
+
+    if (!data.name || !data.owner_name || !data.payment_cycle) {
+      alert("필수 항목을 입력하세요.");
+      return;
+    }
 
     try {
       if (editingPayeeId) {
@@ -591,14 +732,17 @@ if (payeeForm) {
   });
 }
 
-window.editPayee = (id, name, bankName, accountNumber, ownerName) => {
+window.editPayee = (id, name, bankName, accountNumber, ownerName, paymentCycle) => {
   editingPayeeId = id;
   qs("payeeModalTitle").textContent = "거래처 수정";
-  qs("payeeName").value = name;
-  qs("payeeBank").value = bankName;
-  qs("payeeAccount").value = accountNumber;
-  qs("payeeOwner").value = ownerName;
+  qs("payeeName").value = name || "";
+  qs("payeeBank").value = bankName || "";
+  qs("payeeAccount").value = accountNumber || "";
+  qs("payeeOwner").value = ownerName || "";
+  qs("payeePaymentCycle").value = paymentCycle || "";
   payeeModal.style.display = "flex";
+  // 미리보기 업데이트
+  updateMaskPreview();
 };
 
 window.deletePayee = async (id) => {

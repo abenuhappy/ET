@@ -21,6 +21,7 @@ import os
 DATA_DIR = os.environ.get('DATA_DIR', str(APP_DIR))
 JSON_DATA_PATH = Path(DATA_DIR) / "data.json"  # 캐시용
 CSV_DATA_PATH = Path(DATA_DIR) / "expenses_data.csv"  # 기본 저장소
+PAYEES_CSV_PATH = Path(DATA_DIR) / "payees_data.csv"  # 거래처 저장소
 
 # 파일 접근 동기화를 위한 락
 _data_lock = threading.Lock()
@@ -154,10 +155,77 @@ def _load_from_csv() -> Optional[Dict[str, Any]]:
                 }
                 expenses.append(expense)
         
-        # JSON에서 payees 로드 (거래처는 JSON에 저장)
+        # CSV에서 payees 로드 (거래처는 CSV에 저장)
         payees = []
         next_payee_id = 1
+        
+        # 먼저 JSON에서 ID 매핑 정보 가져오기 (있는 경우)
+        payee_id_mapping = {}  # (name, bank_name, account_number, owner_name) -> id
         if JSON_DATA_PATH.exists():
+            try:
+                with open(JSON_DATA_PATH, "r", encoding="utf-8") as f:
+                    json_data = json.load(f)
+                    for payee in json_data.get("payees", []):
+                        key = (
+                            payee.get("name"),
+                            payee.get("bank_name"),
+                            payee.get("account_number"),
+                            payee.get("owner_name")
+                        )
+                        payee_id_mapping[key] = payee.get("id", 0)
+                    next_payee_id = json_data.get("next_payee_id", 1)
+            except:
+                pass
+        
+        # CSV에서 거래처 로드
+        if PAYEES_CSV_PATH.exists():
+            try:
+                with open(PAYEES_CSV_PATH, 'r', encoding='utf-8-sig') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        name = row.get("거래처명", "").strip()
+                        bank_name = row.get("은행명", "").strip()
+                        account_number = row.get("계좌번호", "").strip()
+                        owner_name = row.get("예금주", "").strip()
+                        payment_cycle = row.get("결제 주기", "").strip()
+                        amount_str = row.get("금액", "").strip()
+                        payee_id_str = row.get("ID", "").strip()
+                        
+                        if not name or not owner_name:
+                            continue
+                        
+                        # 금액 파싱
+                        amount = _parse_amount(amount_str) if amount_str else 0
+                        
+                        # ID는 CSV에서 가져오거나, JSON 매핑에서 가져오거나, 없으면 새로 부여
+                        try:
+                            payee_id = int(payee_id_str) if payee_id_str else 0
+                        except ValueError:
+                            payee_id = 0
+                        
+                        if payee_id == 0:
+                            key = (name, bank_name, account_number, owner_name)
+                            payee_id = payee_id_mapping.get(key, next_payee_id)
+                            if payee_id >= next_payee_id:
+                                next_payee_id = payee_id + 1
+                        
+                        payee = {
+                            "id": payee_id,
+                            "name": name,
+                            "bank_name": bank_name,
+                            "account_number": account_number,
+                            "owner_name": owner_name,
+                            "payment_cycle": payment_cycle,
+                            "amount": amount,
+                            "created_at": _get_current_time(),
+                            "updated_at": _get_current_time()
+                        }
+                        payees.append(payee)
+            except Exception as e:
+                print(f"거래처 CSV 파일 로드 실패: {e}")
+        
+        # CSV에 거래처가 없으면 JSON에서 로드 시도
+        if not payees and JSON_DATA_PATH.exists():
             try:
                 with open(JSON_DATA_PATH, "r", encoding="utf-8") as f:
                     json_data = json.load(f)
@@ -212,9 +280,20 @@ def _load_data() -> Dict[str, Any]:
     print("데이터 파일이 없어 초기 데이터 생성")
     initial_data = {
         "expenses": [],
-        "payees": [],
+        "payees": [
+            # 거래처 초기 데이터 (코드에서 직접 수정 가능)
+            # 형식: {"id": 1, "name": "거래처명", "bank_name": "은행명", "account_number": "계좌번호", "owner_name": "예금주", "payment_cycle": "결제주기", "amount": 금액, "created_at": "...", "updated_at": "..."}
+            # 예시:
+            # {"id": 1, "name": "C&C 미술", "bank_name": "카드", "account_number": "", "owner_name": "C&C", "payment_cycle": "1M", "amount": 180000, "created_at": _get_current_time(), "updated_at": _get_current_time()},
+            # {"id": 2, "name": "김영아", "bank_name": "카드", "account_number": "", "owner_name": "김영아", "payment_cycle": "1M", "amount": 390000, "created_at": _get_current_time(), "updated_at": _get_current_time()},
+            # {"id": 3, "name": "농구", "bank_name": "우리은행", "account_number": "1002429296789", "owner_name": "이기범", "payment_cycle": "3M", "amount": 282000, "created_at": _get_current_time(), "updated_at": _get_current_time()},
+            # {"id": 4, "name": "늘품재논술", "bank_name": "국민은행", "account_number": "47580102612761", "owner_name": "김현아", "payment_cycle": "1M", "amount": 184000, "created_at": _get_current_time(), "updated_at": _get_current_time()},
+            # {"id": 5, "name": "세차", "bank_name": "국민은행", "account_number": "40880101094704", "owner_name": "김란향", "payment_cycle": "1M", "amount": 60000, "created_at": _get_current_time(), "updated_at": _get_current_time()},
+            # {"id": 6, "name": "영어과외", "bank_name": "농협", "account_number": "61309851008901", "owner_name": "박채원", "payment_cycle": "1M", "amount": 240000, "created_at": _get_current_time(), "updated_at": _get_current_time()},
+            # {"id": 7, "name": "하연과학", "bank_name": "농협", "account_number": "3561340828353", "owner_name": "허기진", "payment_cycle": "1M", "amount": 100000, "created_at": _get_current_time(), "updated_at": _get_current_time()},
+        ],
         "next_expense_id": 1,
-        "next_payee_id": 1
+        "next_payee_id": 8  # 초기 거래처가 7개이므로 다음 ID는 8
     }
     _save_data(initial_data)
     return initial_data
@@ -273,6 +352,41 @@ def _save_data_to_csv(data: Dict[str, Any]) -> None:
     temp_path.replace(CSV_DATA_PATH)
 
 
+def _save_payees_to_csv(data: Dict[str, Any]) -> None:
+    """거래처 데이터를 CSV 파일에 저장"""
+    PAYEES_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
+    payees = data.get("payees", [])
+    
+    # 임시 파일에 먼저 저장 후 원자적으로 교체
+    temp_path = PAYEES_CSV_PATH.with_suffix('.csv.tmp')
+    with open(temp_path, 'w', newline='', encoding='utf-8-sig') as f:
+        fieldnames = ['ID', '거래처명', '은행명', '계좌번호', '예금주', '결제 주기', '금액']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        # 거래처명 순으로 정렬
+        sorted_payees = sorted(payees, key=lambda x: x.get("name", ""))
+        
+        for payee in sorted_payees:
+            # 금액 포맷팅 (콤마 포함)
+            amount = payee.get('amount', 0)
+            amount_str = f"{int(amount):,}" if amount else ""
+            
+            writer.writerow({
+                'ID': payee.get('id', ''),
+                '거래처명': payee.get('name', ''),
+                '은행명': payee.get('bank_name', ''),
+                '계좌번호': payee.get('account_number', ''),
+                '예금주': payee.get('owner_name', ''),
+                '결제 주기': payee.get('payment_cycle', ''),
+                '금액': amount_str
+            })
+    
+    # 원자적으로 교체
+    temp_path.replace(PAYEES_CSV_PATH)
+
+
 def _save_data_to_json(data: Dict[str, Any]) -> None:
     """데이터를 JSON 파일에 저장 (캐시용)"""
     JSON_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -288,7 +402,8 @@ def _save_data_to_json(data: Dict[str, Any]) -> None:
 
 def _save_data(data: Dict[str, Any]) -> None:
     """데이터를 CSV와 JSON 파일에 저장"""
-    _save_data_to_csv(data)  # CSV가 기본 저장소
+    _save_data_to_csv(data)  # 지출 CSV가 기본 저장소
+    _save_payees_to_csv(data)  # 거래처 CSV 저장
     _save_data_to_json(data)  # JSON은 캐시용
 
 
@@ -304,7 +419,6 @@ def _init_data() -> None:
 
 
 @app.get("/api/payees")
-@login_required
 def list_payees():
     """거래처 목록 조회"""
     with _data_lock:
@@ -314,9 +428,11 @@ def list_payees():
             {
                 "id": p["id"],
                 "name": p["name"],
-                "account_number": p["account_number"],
-                "bank_name": p["bank_name"],
-                "owner_name": p["owner_name"],
+                "account_number": p.get("account_number", ""),
+                "bank_name": p.get("bank_name", ""),
+                "owner_name": p.get("owner_name", ""),
+                "payment_cycle": p.get("payment_cycle", ""),
+                "amount": p.get("amount", 0),
             }
             for p in payees
         ]
@@ -324,7 +440,6 @@ def list_payees():
 
 
 @app.post("/api/payees")
-@login_required
 def create_payee():
     """거래처 추가"""
     payload = request.get_json(force=True) or {}
@@ -332,8 +447,9 @@ def create_payee():
     account_number = payload.get("account_number", "").strip()
     bank_name = payload.get("bank_name", "").strip()
     owner_name = payload.get("owner_name", "").strip()
+    payment_cycle = payload.get("payment_cycle", "").strip()
 
-    if not name or not account_number or not bank_name or not owner_name:
+    if not name or not owner_name or not payment_cycle:
         return jsonify({"error": "필수 항목이 누락되었습니다."}), 400
 
     with _data_lock:
@@ -345,6 +461,7 @@ def create_payee():
             "account_number": account_number,
             "bank_name": bank_name,
             "owner_name": owner_name,
+            "payment_cycle": payment_cycle,
             "created_at": _get_current_time(),
             "updated_at": _get_current_time()
         }
@@ -355,7 +472,6 @@ def create_payee():
 
 
 @app.put("/api/payees/<int:payee_id>")
-@login_required
 def update_payee(payee_id: int):
     """거래처 수정"""
     payload = request.get_json(force=True) or {}
@@ -363,8 +479,9 @@ def update_payee(payee_id: int):
     account_number = payload.get("account_number", "").strip()
     bank_name = payload.get("bank_name", "").strip()
     owner_name = payload.get("owner_name", "").strip()
+    payment_cycle = payload.get("payment_cycle", "").strip()
 
-    if not name or not account_number or not bank_name or not owner_name:
+    if not name or not owner_name or not payment_cycle:
         return jsonify({"error": "필수 항목이 누락되었습니다."}), 400
 
     with _data_lock:
@@ -379,13 +496,13 @@ def update_payee(payee_id: int):
         payee["account_number"] = account_number
         payee["bank_name"] = bank_name
         payee["owner_name"] = owner_name
+        payee["payment_cycle"] = payment_cycle
         payee["updated_at"] = _get_current_time()
         _save_data(data)
     return jsonify({"ok": True})
 
 
 @app.delete("/api/payees/<int:payee_id>")
-@login_required
 def delete_payee(payee_id: int):
     """거래처 삭제"""
     with _data_lock:
@@ -444,8 +561,6 @@ def _parse_date(date_str: str) -> str:
 
 @app.route("/")
 def index():
-    if not session.get('authenticated'):
-        return redirect(url_for('login_page'))
     return render_template("index.html")
 
 
@@ -476,7 +591,6 @@ def logout():
 
 
 @app.get("/api/expenses")
-@login_required
 def list_expenses():
     """지출 목록 조회"""
     with _data_lock:
@@ -501,7 +615,6 @@ def list_expenses():
 
 
 @app.post("/api/expenses")
-@login_required
 def create_expense():
     """지출 추가"""
     payload = request.get_json(force=True) or {}
@@ -545,7 +658,6 @@ def create_expense():
 
 
 @app.put("/api/expenses/<int:expense_id>")
-@login_required
 def update_expense(expense_id: int):
     """지출 수정"""
     payload = request.get_json(force=True) or {}
@@ -588,7 +700,6 @@ def update_expense(expense_id: int):
 
 
 @app.delete("/api/expenses/<int:expense_id>")
-@login_required
 def delete_expense(expense_id: int):
     """지출 삭제"""
     with _data_lock:
@@ -600,7 +711,6 @@ def delete_expense(expense_id: int):
 
 
 @app.post("/api/import/csv")
-@login_required
 def import_csv():
     """CSV 파일 업로드 및 데이터 임포트"""
     if "file" not in request.files:
@@ -681,7 +791,6 @@ def import_csv():
 
 
 @app.get("/api/statistics")
-@login_required
 def get_statistics():
     """통계 정보 조회"""
     with _data_lock:
@@ -733,7 +842,6 @@ def get_statistics():
 
 
 @app.get("/api/expenses/by-date")
-@login_required
 def get_expenses_by_date():
     """날짜별 지출 조회"""
     date_str = request.args.get("date")
@@ -761,8 +869,67 @@ def get_expenses_by_date():
     return jsonify({"expenses": expenses})
 
 
+def _calculate_next_payment_date(last_date_str: str, payment_cycle: str) -> str:
+    """마지막 결제일과 결제주기를 기반으로 다음 결제일 계산"""
+    if not last_date_str or not payment_cycle:
+        return ""
+    
+    try:
+        from datetime import datetime
+        from calendar import monthrange
+        
+        last_date = datetime.strptime(last_date_str, "%Y-%m-%d")
+        
+        def get_valid_day(year, month, day):
+            """해당 월의 유효한 날짜 반환"""
+            max_day = monthrange(year, month)[1]
+            return min(day, max_day)
+        
+        if payment_cycle == "1M":
+            # 1개월 후
+            if last_date.month == 12:
+                year = last_date.year + 1
+                month = 1
+            else:
+                year = last_date.year
+                month = last_date.month + 1
+            day = get_valid_day(year, month, last_date.day)
+            next_date = datetime(year, month, day)
+        elif payment_cycle == "3M":
+            # 3개월 후
+            months_to_add = 3
+            year = last_date.year
+            month = last_date.month + months_to_add
+            while month > 12:
+                month -= 12
+                year += 1
+            day = get_valid_day(year, month, last_date.day)
+            next_date = datetime(year, month, day)
+        elif payment_cycle == "6M":
+            # 6개월 후
+            months_to_add = 6
+            year = last_date.year
+            month = last_date.month + months_to_add
+            while month > 12:
+                month -= 12
+                year += 1
+            day = get_valid_day(year, month, last_date.day)
+            next_date = datetime(year, month, day)
+        elif payment_cycle == "1Y":
+            # 1년 후
+            year = last_date.year + 1
+            day = get_valid_day(year, last_date.month, last_date.day)
+            next_date = datetime(year, last_date.month, day)
+        else:
+            return ""
+        
+        return next_date.strftime("%Y-%m-%d")
+    except Exception as e:
+        print(f"다음 결제일 계산 실패: {e}")
+        return ""
+
+
 @app.get("/api/expenses/calendar")
-@login_required
 def get_calendar_data():
     """캘린더용 월별 지출 데이터 조회"""
     year = request.args.get("year", type=int)
@@ -796,12 +963,78 @@ def get_calendar_data():
                 daily_data[date_str] = {"total": 0, "count": 0}
             daily_data[date_str]["total"] += e.get("amount", 0)
             daily_data[date_str]["count"] += 1
+        
+        # 다음 결제일 계산
+        # 1. 거래처 테이블에서 거래처명과 결제주기 매핑 생성
+        payees = data.get("payees", [])
+        payee_cycle_map = {}  # {payee_name: payment_cycle}
+        for payee in payees:
+            payee_name = payee.get("name", "").strip()
+            payment_cycle = payee.get("payment_cycle", "").strip()
+            if payee_name and payment_cycle:
+                payee_cycle_map[payee_name] = payment_cycle
+        
+        # 2. 지출 내역에서 거래처별로 마지막 결제일 찾기
+        merchant_last_payment = {}  # {merchant: {"date": "YYYY-MM-DD", "cycle": "1M"}}
+        for e in expenses:
+            merchant = e.get("merchant", "").strip()
+            approval_date = e.get("approval_date", "")
+            
+            if not merchant or not approval_date:
+                continue
+            
+            # 결제주기는 거래처 테이블에서 우선 찾고, 없으면 지출 내역에서 가져오기
+            payment_cycle = payee_cycle_map.get(merchant, e.get("payment_cycle", "").strip())
+            
+            if not payment_cycle:
+                continue
+            
+            if merchant not in merchant_last_payment:
+                merchant_last_payment[merchant] = {
+                    "date": approval_date,
+                    "cycle": payment_cycle
+                }
+            else:
+                # 더 최근 날짜로 업데이트
+                if approval_date > merchant_last_payment[merchant]["date"]:
+                    merchant_last_payment[merchant] = {
+                        "date": approval_date,
+                        "cycle": payment_cycle
+                    }
+        
+        # 3. 다음 결제일 계산 및 해당 월에 포함되는지 확인
+        # 오늘 날짜와 1주일 전 날짜 계산
+        from datetime import datetime, timedelta
+        today = datetime.now().date()
+        one_week_ago = today - timedelta(days=7)
+        today_str = today.strftime("%Y-%m-%d")
+        one_week_ago_str = one_week_ago.strftime("%Y-%m-%d")
+        
+        next_payments = {}  # {date_str: [merchant1, merchant2, ...]}
+        for merchant, info in merchant_last_payment.items():
+            next_date = _calculate_next_payment_date(info["date"], info["cycle"])
+            # 해당 월에 포함되고, 오늘 이후이며, 1주일 이내인 날짜만 표시
+            if next_date and start_date <= next_date < end_date:
+                # 과거 날짜는 제외
+                if next_date < today_str:
+                    continue
+                # 1주일 이상 지난 날짜는 제외
+                if next_date < one_week_ago_str:
+                    continue
+                if next_date not in next_payments:
+                    next_payments[next_date] = []
+                next_payments[next_date].append(merchant)
+        
+        # 4. daily_data에 다음 결제일 정보 추가
+        for date_str, merchants in next_payments.items():
+            if date_str not in daily_data:
+                daily_data[date_str] = {"total": 0, "count": 0}
+            daily_data[date_str]["next_payments"] = merchants
     
     return jsonify({"daily_data": daily_data})
 
 
 @app.get("/api/expenses/search")
-@login_required
 def search_expenses():
     """거래처 또는 지불처 검색"""
     query = request.args.get("q", "").strip()
