@@ -37,7 +37,7 @@ body {
   color: var(--text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  padding-bottom: 80px;
+  padding-bottom: max(100px, calc(80px + env(safe-area-inset-bottom)));
 }
 
 .wrap {
@@ -225,10 +225,11 @@ h1 {
   -webkit-backdrop-filter: blur(16px);
   display: flex;
   justify-content: space-around;
-  padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
+  padding: 12px 0 max(34px, calc(12px + env(safe-area-inset-bottom) + 10px));
   border-top: 1px solid var(--border);
   z-index: 1000;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
+  min-height: 70px;
 }
 
 .bottom-nav-inner {
