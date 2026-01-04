@@ -1,0 +1,580 @@
+:root {
+    --primary-color: #4A90E2;
+    --background-color: #F5F7FA;
+    --card-bg: #FFFFFF;
+    --text-color: #333333;
+    --text-muted: #888888;
+    --border-color: #E1E4E8;
+    --danger-color: #FF5252;
+    --font-family: 'Noto Sans KR', sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-family);
+    background-color: var(--background-color);
+    color: var(--text-color);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+header {
+    background-color: var(--card-bg);
+    padding: 1rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+h1 {
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+
+.month-selector {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.month-selector button {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: var(--primary-color);
+    padding: 0.5rem;
+    /* Touch target size */
+}
+
+nav {
+    display: flex;
+    gap: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    overflow-x: auto;
+    /* Allow scroll on small screens if needed */
+}
+
+.nav-btn {
+    background: none;
+    border: none;
+    padding: 0.5rem 0.5rem;
+    font-size: 1rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    position: relative;
+    white-space: nowrap;
+    flex: 1;
+    /* Distribute evenly */
+    text-align: center;
+}
+
+.nav-btn.active {
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+.nav-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background-color: var(--primary-color);
+}
+
+/* Main Layout */
+main {
+    padding: 1rem;
+    max-width: 800px;
+    margin: 0 auto;
+    padding-bottom: 80px;
+    /* Space for FAB */
+    width: 100%;
+}
+
+.view {
+    display: none;
+}
+
+.view.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Calendar */
+.calendar-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    text-align: center;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    padding: 0 4px;
+}
+
+.calendar-header div:first-child {
+    color: var(--danger-color);
+}
+
+/* Sunday red */
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+
+.day-cell {
+    background-color: var(--card-bg);
+    aspect-ratio: 1/1.2;
+    /* Taller cells for mobile */
+    border-radius: 8px;
+    padding: 4px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    font-size: 0.8rem;
+    position: relative;
+    border: 1px solid transparent;
+}
+
+.day-cell.today {
+    background-color: #E3F2FD;
+    border-color: var(--primary-color);
+}
+
+.day-cell.other-month {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.day-expense {
+    font-size: 0.7rem;
+    /* Smaller font */
+    color: var(--primary-color);
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: auto;
+    /* Push to bottom */
+    width: 100%;
+}
+
+.day-num {
+    font-weight: 500;
+}
+
+.monthly-summary {
+    margin-top: 2rem;
+    background-color: var(--card-bg);
+    padding: 1rem;
+    border-radius: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 1.1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.monthly-summary .amount {
+    color: var(--primary-color);
+    font-weight: 700;
+    font-size: 1.3rem;
+}
+
+/* Vendor List */
+.vendor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.vendor-card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 1rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.vendor-card:active {
+    transform: scale(0.98);
+}
+
+.vendor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.8rem;
+}
+
+.vendor-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.vendor-total {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.year-swiper {
+    display: flex;
+    overflow-x: auto;
+    gap: 0.8rem;
+    padding-bottom: 0.5rem;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    /* Smooth scroll on iOS */
+    padding-right: 1rem;
+    /* End padding */
+}
+
+.year-swiper::-webkit-scrollbar {
+    display: none;
+}
+
+.year-chip {
+    background-color: #F0F4F8;
+    padding: 6px 14px;
+    border-radius: 100px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Stats */
+.chart-container {
+    background-color: var(--card-bg);
+    padding: 1rem;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    /* Remove fixed height from container */
+    overflow: hidden;
+    /* Contain overflow */
+}
+
+/* New wrapper for canvas */
+.canvas-wrapper {
+    position: relative;
+    height: 400px;
+    /* Specific height for 12 items */
+    width: 100%;
+}
+
+.chart-container h3 {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: var(--text-muted);
+}
+
+/* FAB */
+.fab {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    width: 3.5rem;
+    height: 3.5rem;
+    border-radius: 50%;
+    background-color: var(--primary-color);
+    color: white;
+    font-size: 2rem;
+    border: none;
+    box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+    z-index: 90;
+}
+
+.fab:hover {
+    transform: scale(1.05);
+}
+
+.fab:active {
+    transform: scale(0.95);
+}
+
+/* Modal */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+    padding: 1rem;
+    /* Add padding for small screens */
+}
+
+.modal-content {
+    background-color: var(--card-bg);
+    width: 100%;
+    max-width: 500px;
+    border-radius: 16px;
+    overflow: hidden;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.modal-header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-body {
+    padding: 1rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.modal-footer {
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.close-modal {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.5rem;
+    /* Touch target */
+    color: var(--text-muted);
+}
+
+/* Forms */
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+input,
+select {
+    width: 100%;
+    padding: 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    background-color: #FAFAFA;
+    -webkit-appearance: none;
+    /* Normalize mobile Select */
+}
+
+input:focus,
+select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    background-color: white;
+}
+
+.btn-submit {
+    width: 100%;
+    padding: 1rem;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 1rem;
+}
+
+/* Expense List in Modal */
+.expense-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.expense-item:last-child {
+    border-bottom: none;
+}
+
+.item-info {
+    flex-grow: 1;
+    overflow: hidden;
+    /* Prevent text overflow */
+    padding-right: 0.5rem;
+}
+
+.item-vendor {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 2px;
+}
+
+.item-desc {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+.item-right {
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+    /* Keep amount visible */
+}
+
+.item-amount {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.item-actions {
+    display: flex;
+    gap: 12px;
+    /* Bigger gap for touch */
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    font-size: 1rem;
+    /* Bigger icon for touch */
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+}
+
+.btn-icon:hover {
+    color: var(--primary-color);
+}
+
+.btn-icon.delete:hover {
+    color: var(--danger-color);
+}
+
+.btn-primary {
+    width: 100%;
+    padding: 0.8rem;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    main {
+        padding: 0.5rem;
+    }
+
+    .header-content {
+        flex-direction: row;
+        /* Keep row for space efficiency */
+    }
+
+    .calendar-grid {
+        gap: 2px;
+    }
+
+    .day-cell {
+        padding: 2px;
+        aspect-ratio: 1/1.3;
+        /* Even taller for mobile content */
+    }
+
+    .day-num {
+        font-size: 0.75rem;
+    }
+
+    .day-expense {
+        font-size: 0.65rem;
+        letter-spacing: -0.5px;
+        /* Condense numbers */
+    }
+
+    /* Month Selector */
+    .month-selector {
+        font-size: 1rem;
+    }
+
+    .month-selector button {
+        padding: 0.2rem;
+    }
+
+    /* FAB Position */
+    .fab {
+        bottom: 1.5rem;
+        right: 1.5rem;
+        width: 3rem;
+        height: 3rem;
+        font-size: 1.5rem;
+    }
+
+    /* Stats Charts */
+    .chart-container {
+        padding: 0.5rem;
+    }
+}

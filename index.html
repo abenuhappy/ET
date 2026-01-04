@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Chart.js for Statistics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+
+    <header>
+        <div class="header-content">
+            <h1>Expense Tracker</h1>
+            <div class="month-selector">
+                <button id="prevMonth">&lt;</button>
+                <span id="currentMonthLabel">2024. 01</span>
+                <button id="nextMonth">&gt;</button>
+            </div>
+        </div>
+        <nav>
+            <button class="nav-btn active" data-tab="calendar">캘린더</button>
+            <button class="nav-btn" data-tab="vendors">거래처</button>
+            <button class="nav-btn" data-tab="stats">통계</button>
+        </nav>
+    </header>
+
+    <main id="app">
+        <!-- Calendar View -->
+        <section id="calendar" class="view active">
+            <div class="calendar-header">
+                <div>일</div>
+                <div>월</div>
+                <div>화</div>
+                <div>수</div>
+                <div>목</div>
+                <div>금</div>
+                <div>토</div>
+            </div>
+            <div id="calendarGrid" class="calendar-grid">
+                <!-- Javascript will populate this -->
+            </div>
+            <div class="monthly-summary">
+                <span>이번 달 총 지출:</span>
+                <span id="monthlyTotal" class="amount">0원</span>
+            </div>
+        </section>
+
+        <!-- Vendors View -->
+        <section id="vendors" class="view hidden">
+            <div id="vendorList" class="vendor-list">
+                <!-- Javascript will populate vendor cards -->
+            </div>
+        </section>
+
+        <!-- Stats View -->
+        <section id="stats" class="view hidden">
+            <div class="chart-container">
+                <h3>월별 추이</h3>
+                <div class="canvas-wrapper">
+                    <canvas id="monthlyChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-container">
+                <h3>거래처별 월평균</h3>
+                <div class="canvas-wrapper">
+                    <canvas id="vendorChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-container">
+                <h3>카테고리별 월평균</h3>
+                <div class="canvas-wrapper">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Floating Action Button for Adding Expense -->
+    <!-- Floating Action Button Removed -->
+
+    <!-- Modals -->
+
+    <!-- Day Detail Modal -->
+    <div id="dayModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="dayModalDate">2024-01-01</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <ul id="dayExpenseList" class="expense-list">
+                    <!-- Javascript will populate list -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Form Modal - Removed -->
+    <!-- Confirm Modal - Removed -->
+
+    <!-- Expense Form Modal (Add/Edit) -->
+    <div id="formModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="formModalTitle">지출 추가</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="expenseForm">
+                    <input type="hidden" id="expenseId">
+
+                    <div class="form-group">
+                        <label>날짜</label>
+                        <input type="date" id="inputDate" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>거래처</label>
+                        <input type="text" id="inputVendor" placeholder="예: 스타벅스" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>카테고리</label>
+                        <select id="inputCategory">
+                            <option value="식비">식비</option>
+                            <option value="교통/차량">교통/차량</option>
+                            <option value="쇼핑">쇼핑</option>
+                            <option value="주거/통신">주거/통신</option>
+                            <option value="의료/건강">의료/건강</option>
+                            <option value="문화/여가">문화/여가</option>
+                            <option value="교육">교육</option>
+                            <option value="경조사/회비">경조사/회비</option>
+                            <option value="기타">기타</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>금액</label>
+                        <input type="number" id="inputAmount" placeholder="0" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label>결제수단</label>
+                        <input type="text" id="inputMethod" list="methodOptions" placeholder="카드">
+                        <datalist id="methodOptions">
+                            <option value="카드">
+                            <option value="현금">
+                            <option value="계좌이체">
+                        </datalist>
+                    </div>
+
+                    <div class="form-group">
+                        <label>주기</label>
+                        <select id="inputCycle">
+                            <option value="일회성">일회성</option>
+                            <option value="매월">매월</option>
+                            <option value="매년">매년</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>내용</label>
+                        <input type="text" id="inputContent" placeholder="메모">
+                    </div>
+
+                    <button type="submit" class="btn-submit">저장</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirmModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 300px;">
+            <div class="modal-header">
+                <h2>삭제 확인</h2>
+                <button class="close-modal" onclick="closeConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 2rem 1rem;">
+                <p>정말 삭제하시겠습니까?</p>
+            </div>
+            <div class="modal-footer" style="display: flex; gap: 1rem;">
+                <button class="btn-primary" style="background-color: #ccc; color: #333;"
+                    onclick="closeConfirmModal()">취소</button>
+                <button id="confirmDeleteBtn" class="btn-primary" style="background-color: #FF5252;">삭제</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>
