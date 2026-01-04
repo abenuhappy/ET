@@ -440,6 +440,24 @@ window.toggleVendorDetails = (event, vendorName, year) => {
 let monthlyChart = null;
 let vendorChart = null;
 
+
+// Helper for dynamic colors
+function getColorForValue(value, max) {
+    if (value === 0) return '#e0e0e0'; // Gray for zero
+
+    // Calculate ratio (0 to 1)
+    const ratio = max > 0 ? value / max : 0;
+
+    // Interpolate between Green (low) and Red (high)
+    // Low (0.0): #4CAF50 (Green) -> High (1.0): #FF5252 (Red)
+    // We can use HSL for smoother transition.
+    // Green is approx 120deg, Red is 0deg.
+    // Let's vary Hue from 120 (Green) down to 0 (Red).
+
+    const hue = ((1 - ratio) * 120).toString(10);
+    return `hsl(${hue}, 70%, 60%)`;
+}
+
 function renderStats() {
     const ctxM = document.getElementById('monthlyChart').getContext('2d');
     const ctxV = document.getElementById('vendorChart').getContext('2d');
@@ -478,7 +496,17 @@ function renderStats() {
             datasets: [{
                 label: '월별 지출',
                 data: chartData,
-                backgroundColor: '#4A90E2',
+                backgroundColor: function (context) {
+                    const chart = context.chart;
+                    const { ctx, chartArea } = chart;
+                    if (!chartArea) {
+                        return null;
+                    }
+                    // Find max value in dataset to normalize
+                    const values = chart.data.datasets[0].data;
+                    const max = Math.max(...values);
+                    return getColorForValue(context.raw, max);
+                },
                 borderRadius: 4
             }]
         },
@@ -517,11 +545,20 @@ function renderStats() {
         vendorStats[e.vendor].months.add(e.date.substring(0, 7));
     });
 
-    const vendorLabels = Object.keys(vendorStats);
-    const vendorAvgs = vendorLabels.map(v => {
+    const vendorLabelsRaw = Object.keys(vendorStats);
+    let vendorDataArray = vendorLabelsRaw.map(v => {
         const count = vendorStats[v].months.size || 1;
-        return vendorStats[v].total / count;
+        return {
+            label: v,
+            value: vendorStats[v].total / count
+        };
     });
+
+    // Sort by value descending
+    vendorDataArray.sort((a, b) => b.value - a.value);
+
+    const vendorLabels = vendorDataArray.map(d => d.label);
+    const vendorAvgs = vendorDataArray.map(d => d.value);
 
     if (vendorChart) vendorChart.destroy();
     vendorChart = new Chart(ctxV, {
@@ -531,7 +568,16 @@ function renderStats() {
             datasets: [{
                 label: '월평균 지출',
                 data: vendorAvgs,
-                backgroundColor: '#FF5252',
+                backgroundColor: function (context) {
+                    const chart = context.chart;
+                    const { ctx, chartArea } = chart;
+                    if (!chartArea) {
+                        return null;
+                    }
+                    const values = chart.data.datasets[0].data;
+                    const max = Math.max(...values);
+                    return getColorForValue(context.raw, max);
+                },
                 borderRadius: 4
             }]
         },
@@ -568,11 +614,20 @@ function renderStats() {
         categoryStats[cat].months.add(e.date.substring(0, 7));
     });
 
-    const categoryLabels = Object.keys(categoryStats);
-    const categoryAvgs = categoryLabels.map(c => {
+    const categoryLabelsRaw = Object.keys(categoryStats);
+    let categoryDataArray = categoryLabelsRaw.map(c => {
         const count = categoryStats[c].months.size || 1;
-        return categoryStats[c].total / count;
+        return {
+            label: c,
+            value: categoryStats[c].total / count
+        };
     });
+
+    // Sort by value descending
+    categoryDataArray.sort((a, b) => b.value - a.value);
+
+    const categoryLabels = categoryDataArray.map(d => d.label);
+    const categoryAvgs = categoryDataArray.map(d => d.value);
 
     // Assuming categoryChart is global or on window like others
     if (window.categoryChart instanceof Chart) window.categoryChart.destroy();
@@ -587,7 +642,16 @@ function renderStats() {
             datasets: [{
                 label: '월평균 지출',
                 data: categoryAvgs,
-                backgroundColor: '#4CAF50', // Green
+                backgroundColor: function (context) {
+                    const chart = context.chart;
+                    const { ctx, chartArea } = chart;
+                    if (!chartArea) {
+                        return null;
+                    }
+                    const values = chart.data.datasets[0].data;
+                    const max = Math.max(...values);
+                    return getColorForValue(context.raw, max);
+                },
                 borderRadius: 4
             }]
         },
