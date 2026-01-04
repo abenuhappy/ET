@@ -132,13 +132,17 @@ function renderCalendar() {
             return eDate.getFullYear() === year && eDate.getMonth() === month && eDate.getDate() === d;
         });
 
-        const dailyTotal = dailyExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+        if (dailyExpenses.length > 0) {
+            const vendorContainer = document.createElement('div');
+            vendorContainer.className = 'day-vendor-list';
 
-        if (dailyTotal > 0) {
-            const totalEl = document.createElement('div');
-            totalEl.className = 'day-expense';
-            totalEl.textContent = formatCurrency(dailyTotal);
-            cell.appendChild(totalEl);
+            dailyExpenses.forEach(exp => {
+                const vendorEl = document.createElement('div');
+                vendorEl.className = 'day-vendor-item';
+                vendorEl.textContent = exp.vendor;
+                vendorContainer.appendChild(vendorEl);
+            });
+            cell.appendChild(vendorContainer);
         }
 
         // Check if today
