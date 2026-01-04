@@ -171,6 +171,8 @@ main {
     font-size: 0.8rem;
     position: relative;
     border: 1px solid transparent;
+    min-width: 0;
+    /* Fix for grid item expansion */
 }
 
 .day-cell.today {
