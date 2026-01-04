@@ -65,6 +65,12 @@ function switchTab(tabId) {
         view.classList.toggle('active', view.id === tabId);
         view.classList.toggle('hidden', view.id !== tabId);
     });
+
+    // Toggle Month Selector Visibility
+    const monthSelector = document.querySelector('.month-selector');
+    if (monthSelector) {
+        monthSelector.style.display = (tabId === 'calendar') ? 'flex' : 'none';
+    }
 }
 
 async function loadData() {
